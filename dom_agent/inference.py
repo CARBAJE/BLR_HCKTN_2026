@@ -11,15 +11,10 @@ Environment variables:
     HF_TOKEN      — API key              (REQUIRED, no default)
 
 Usage:
-    python inference.py \\
-        --server http://localhost:5173 \\
-        --instruction "Open the Terminal" \\
-        --max_steps 30
+    python inference.py
 """
 
 from __future__ import annotations
-
-import argparse
 import json
 import os
 import re
@@ -32,6 +27,9 @@ from openai import OpenAI
 # ────────────────────────────────────────────────────────────────────────────
 # Configuration from environment
 # ────────────────────────────────────────────────────────────────────────────
+SERVER_URL   = "http://localhost:8000"
+TASKS        = ["easy", "medium", "hard"]
+
 API_BASE_URL = os.environ.get("API_BASE_URL", "https://api.openai.com/v1")
 MODEL_NAME   = os.environ.get("MODEL_NAME", "gpt-4o-mini")
 HF_TOKEN     = os.environ.get("HF_TOKEN")
@@ -234,30 +232,29 @@ def emit_end(success: bool, steps: int, rewards: List[float]) -> None:
 # ────────────────────────────────────────────────────────────────────────────
 def run(
     server_url: str,
-    instruction: str,
+    task_id: str,
     max_steps: int = 30,
-    task_name: str = "os_navigation",
 ) -> None:
     env = EnvClient(server_url)
 
     # ── Reset ────────────────────────────────────────────────────────────────
     try:
-        env.reset(instruction=instruction)
+        env.reset(instruction=task_id)
     except Exception as e:
-        _err(f"/reset failed: {e}")
-        sys.exit(1)
+        _err(f"/reset failed for task '{task_id}': {e}")
+        return
 
     # ── Get initial state ────────────────────────────────────────────────────
     try:
         initial_state = env.state()
-        ep_instruction = initial_state.get("instruction", instruction)
-        _log(f"Instruction: \"{ep_instruction}\"")
+        ep_instruction = initial_state.get("instruction", task_id)
+        _log(f"Task: '{task_id}' — Instruction: \"{ep_instruction}\"")
         _log(f"Initial DOM: {len(initial_state.get('dom', []))} elements")
     except Exception:
-        ep_instruction = instruction
+        ep_instruction = task_id
 
     # ── Start ────────────────────────────────────────────────────────────────
-    emit_start(task=task_name, model=MODEL_NAME)
+    emit_start(task=task_id, model=MODEL_NAME)
 
     all_rewards: List[float] = []
     success  = False
@@ -278,7 +275,7 @@ def run(
             break
 
         dom: List[Dict] = state.get("dom", [])
-        ep_instruction   = state.get("instruction", instruction)
+        ep_instruction   = state.get("instruction", task_id)
 
         if not dom:
             error_msg = "empty_dom"
@@ -333,27 +330,7 @@ def run(
     emit_end(success=success, steps=len(all_rewards), rewards=all_rewards)
 
 
-# ────────────────────────────────────────────────────────────────────────────
-# CLI
-# ────────────────────────────────────────────────────────────────────────────
-def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="OpenEnv LLM Agent for OSaaS")
-    p.add_argument("--server", default="http://localhost:5173",
-                   help="OSaaS environment server URL")
-    p.add_argument("--instruction", default="Complete the task on screen",
-                   help="Natural language task instruction")
-    p.add_argument("--max_steps", type=int, default=30,
-                   help="Maximum steps per episode")
-    p.add_argument("--task_name", default="os_navigation",
-                   help="Task name for [START] log line")
-    return p.parse_args()
-
-
 if __name__ == "__main__":
-    args = parse_args()
-    run(
-        server_url=args.server,
-        instruction=args.instruction,
-        max_steps=args.max_steps,
-        task_name=args.task_name,
-    )
+    for task_id in TASKS:
+        _log(f"===== Starting task: {task_id} =====")
+        run(server_url=SERVER_URL, task_id=task_id, max_steps=30)
